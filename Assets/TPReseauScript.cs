@@ -50,10 +50,7 @@ public class TPReseauScript : MonoBehaviour
         sourisXIF.text= ""+pos.x;
         sourisYIF.text= ""+pos.y;
         Client.SetMessage(pos.x, pos.y);
-         receptionServeur.text= "dernier message :\n"
-                           + (null!=Serveur.derniereReception
-                                  ?Serveur.derniereReception
-                                  :"");
+        receptionServeur.text = Serveur.logs.toString();
     }
 
 }

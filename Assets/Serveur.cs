@@ -9,17 +9,25 @@ class Serveur {
     public static Thread zt;
     private static int portServeur;
     private static int connexionsTraitees = 0;
-    public static string derniereReception = null;
+    public static InfoList logs = new InfoList(10);
 
     public static void Protocole(Socket ear) {
         byte[] buffer = new byte[2048];
         int lus = ear.Receive(buffer);
         
         if (lus > 0) {
-            derniereReception = Encoding.ASCII.GetString(buffer, 0, lus);
+            String derniereReception = Encoding.ASCII.GetString(buffer).Substring(0, lus);
             Debug.Log("Serveur.Protocole(): reçu du client : " + derniereReception);
             
-            connexionsTraitees++;
+            int ml = derniereReception.Length;
+            String method = derniereReception.Substring(0, 4);
+
+            if (method.Equals("POST") && ' ' == derniereReception[4] && '\n' == derniereReception[ml - 1]) {
+                String data = derniereReception.Substring(5, ml - 6);
+                logs.addItem(ear.RemoteEndPoint + " lié à " + ear.LocalEndPoint + " : " + data);
+                connexionsTraitees++;
+            }
+            
             ear.Send(Encoding.ASCII.GetBytes(connexionsTraitees.ToString()));
         }
     }
@@ -46,11 +54,10 @@ class Serveur {
         catch (Exception e) {
             if (sock != null) sock.Close();
             zt = null;
-            derniereReception = null;
+
             throw e;
         }
         finally {
-            derniereReception = null;
             zt = null;
         }
     }
@@ -65,7 +72,6 @@ class Serveur {
         zt.Start();
     }
 }
-
 
   /*
   using System;
