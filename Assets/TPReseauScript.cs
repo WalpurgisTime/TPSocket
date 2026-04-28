@@ -10,6 +10,7 @@ public class TPReseauScript : MonoBehaviour
     public Button ServeurBtn,ClientBtn;
     public TMP_InputField adresseCibleIF, portServeurIF;
     public TMP_InputField sourisXIF, sourisYIF;
+    public TMP_Text receptionServeur;
 
     private IPAddress adresseCibleChaine= IPAddress.Parse("127.0.0.1");
     private int portServeur= 9090;
@@ -49,6 +50,10 @@ public class TPReseauScript : MonoBehaviour
         sourisXIF.text= ""+pos.x;
         sourisYIF.text= ""+pos.y;
         Client.SetMessage(pos.x, pos.y);
+         receptionServeur.text= "dernier message :\n"
+                           + (null!=Serveur.derniereReception
+                                  ?Serveur.derniereReception
+                                  :"");
     }
 
 }
