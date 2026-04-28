@@ -9,6 +9,8 @@ public class TPReseauScript : MonoBehaviour
 {
     public Button ServeurBtn,ClientBtn;
     public TMP_InputField adresseCibleIF, portServeurIF;
+    public TMP_InputField sourisXIF, sourisYIF;
+
     private IPAddress adresseCibleChaine= IPAddress.Parse("127.0.0.1");
     private int portServeur= 9090;
     void Start()
@@ -17,6 +19,7 @@ public class TPReseauScript : MonoBehaviour
         ClientBtn.onClick.AddListener(ClicCLientDemarre);
         adresseCibleIF.onEndEdit.AddListener(recupereAdresseCible);
         portServeurIF.onEndEdit.AddListener(recuperePortServeur);
+        Client.SetMessage(0,0);
 
     }
 
@@ -40,8 +43,12 @@ public class TPReseauScript : MonoBehaviour
 
     void Update()
     {
-    ServeurBtn.interactable= (null==Serveur.zt);
-    ClientBtn.interactable= (null==Client.zt);
+        ServeurBtn.interactable= (null==Serveur.zt);
+        ClientBtn.interactable= (null==Client.zt);
+        Vector3 pos= Input.mousePosition;
+        sourisXIF.text= ""+pos.x;
+        sourisYIF.text= ""+pos.y;
+        Client.SetMessage(pos.x, pos.y);
     }
 
 }

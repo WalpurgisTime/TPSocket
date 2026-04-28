@@ -6,43 +6,46 @@ using System.Net.Sockets;
 using System.Threading;
 
 class Serveur {
-  public static Thread zt;
-  private static int portServeur;
-  public static void Run(){
-    byte[] buffer = new byte[2048];
-    Socket sock = new Socket(AddressFamily.InterNetwork
-                              , SocketType.Stream
-                              , ProtocolType.Tcp);
-    IPAddress addr = IPAddress.Any;
-    IPEndPoint endPoint = new IPEndPoint(addr, portServeur);
-    sock.Bind(endPoint);
-    sock.Listen(1);
-    Socket ear = sock.Accept();
-    ear.Receive(buffer);
-    Debug.Log("Server.Run(): Connexion depuis : "
-                     + Encoding.ASCII.GetString(buffer));
-    ear.Send(Encoding.ASCII.GetBytes("Hello"));
-    Array.Clear(buffer, 0, buffer.Length);
-    ear.Receive(buffer);
-    Debug.Log("Server.Run(): Fin ? "
-                     + Encoding.ASCII.GetString(buffer));
-    ear.Close();
-    sock.Close();
-    Debug.Log("Serveur Fin");
-    zt= null;
-  }
-  public static void Demarre(int port) {
-    if(null!=zt){
-      Debug.Log("Thread serveur déjà démarré");
-      return;
-      }
-    portServeur= port;
-    zt= new Thread(new ThreadStart(Run));
-    zt.Start();
+    public static Thread zt;
+    private static int portServeur;
+
+    public static void Run() {
+        byte[] buffer = new byte[2048];
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        
+        sock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+
+        IPAddress addr = IPAddress.Any;
+        IPEndPoint endPoint = new IPEndPoint(addr, portServeur);
+        
+        sock.Bind(endPoint);
+        sock.Listen(5);
+
+        while (true) {
+            Socket ear = sock.Accept();
+            
+            int nbReceived = ear.Receive(buffer);
+            Debug.Log("Server.Run(): Connexion depuis : " + Encoding.ASCII.GetString(buffer, 0, nbReceived));
+            
+            ear.Send(Encoding.ASCII.GetBytes("Hello"));
+            
+            Array.Clear(buffer, 0, buffer.Length);
+            nbReceived = ear.Receive(buffer);
+            Debug.Log("Server.Run(): Fin ? " + Encoding.ASCII.GetString(buffer, 0, nbReceived));
+            
+            ear.Close();
+        }
     }
-  }
 
-
+    public static void Demarre(int port) {
+        if (null != zt) {
+            return;
+        }
+        portServeur = port;
+        zt = new Thread(new ThreadStart(Run));
+        zt.Start();
+    }
+}
 
 
   /*
