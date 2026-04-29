@@ -267,50 +267,60 @@ class ProtocoleServeur {
         byte[] buffer = new byte[4096];
         bool keepalive = true;
 
-        try {
-            while (keepalive) {
+        try
+        {
+            while (keepalive)
+            {
                 int lus = this.ear.Receive(buffer);
                 if (lus <= 0) break;
 
                 string msg = Encoding.ASCII.GetString(buffer, 0, lus);
                 string[] lignes = msg.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.None);
-                
-                if (lignes.Length > 0) {
+
+                if (lignes.Length > 0)
+                {
                     string[] parts = lignes[0].Split(' ');
-                    if (parts.Length >= 2 && parts[0] == "GET") {
+                    if (parts.Length >= 2 && parts[0] == "GET")
+                    {
                         string chemin = parts[1] == "/" ? "index.html" : parts[1].TrimStart('/');
-                        
+
                         keepalive = msg.Contains("Connection: keep-alive");
 
                         string corps;
                         string status = "200 OK";
 
-                        if (System.IO.File.Exists(chemin)) {
+                        if (System.IO.File.Exists(chemin))
+                        {
                             corps = System.IO.File.ReadAllText(chemin);
-                        } else {
+                        }
+                        else
+                        {
                             status = "404 Not Found";
                             corps = "<html><body><h1>404 - Fichier non trouve</h1></body></html>";
 
-                        string date = DateTime.Now.ToString("R"); 
-                        string entete = "HTTP/1.1 " + status + "\r\n" +
-                                       "Date: " + date + "\r\n" +
-                                       "Server: MiniServeurUnity/1.0\r\n" +
-                                       "Content-Type: text/html\r\n" +
-                                       "Content-Length: " + Encoding.UTF8.GetByteCount(corps) + "\r\n" +
-                                       "Connection: " + (keepalive ? "keep-alive" : "close") + "\r\n" +
-                                       "\r\n";
+                            string date = DateTime.Now.ToString("R");
+                            string entete = "HTTP/1.1 " + status + "\r\n" +
+                                            "Date: " + date + "\r\n" +
+                                            "Server: MiniServeurUnity/1.0\r\n" +
+                                            "Content-Type: text/html\r\n" +
+                                            "Content-Length: " + Encoding.UTF8.GetByteCount(corps) + "\r\n" +
+                                            "Connection: " + (keepalive ? "keep-alive" : "close") + "\r\n" +
+                                            "\r\n";
 
-                        this.ear.Send(Encoding.ASCII.GetBytes(entete + corps));
-    
-                        if (!keepalive) break;
+                            this.ear.Send(Encoding.ASCII.GetBytes(entete + corps));
+
+                            if (!keepalive) break;
+                        }
                     }
                 }
             }
         }
-        catch (Exception e) {
+        catch (Exception e)
+        {
             Debug.Log("Erreur Protocole: " + e.Message);
         }
-        finally {
+        finally
+        {
             ear.Close();
         }
     }
