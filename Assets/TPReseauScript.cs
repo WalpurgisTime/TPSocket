@@ -1,13 +1,14 @@
-using UnityEngine;
-using UnityEngine.UI;
-using System.Threading;
+
+using UnityEngine ;
+using UnityEngine.UI; 
 using System.Net;
 using TMPro;
 using System;
 using System.Text;
 using System.Net.Sockets;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.IO;
+using System.Threading;
 
 public class TPReseauScript : MonoBehaviour
 {
@@ -31,8 +32,9 @@ public class TPReseauScript : MonoBehaviour
     public void ClicServeurDemarre(){
         Debug.Log("Serveur should start");
         Serveur.Demarre(portServeur);
-    }
-    public void ClicCLientDemarre(){
+     }
+
+     public void ClicCLientDemarre(){
         Debug.Log("Client should start");
         Client.Demarre(adresseCibleChaine, portServeur);
     }
@@ -62,47 +64,69 @@ public class TPReseauScript : MonoBehaviour
 
 class Client {
     public static int zt = 0;
-    private static readonly object l = new object();
+    private static readonly System.Object l = new System.Object();
+    private static System.Random rnd = new System.Random();
     public const int NB_CL = 20;
+    
     private static IPAddress targetAddr;
     private static int portCible;
-    private static float mx, my;
+    private static float mx;
+    private static float my;
+    private static int compteur = 0;
 
     public static void SetMessage(float x, float y) {
-        lock (l) { mx = x; my = y; }
+        lock(l) {
+            mx = x; 
+            my = y;
+        }
+    }
+
+    public static String GetMessage(Socket sock) {
+        Joueur j = new Joueur();
+        j.id = "client_" + (compteur++);
+        j.adresseIP = "" + ((IPEndPoint)sock.LocalEndPoint).Address;
+        j.port = ((IPEndPoint)sock.LocalEndPoint).Port;
+        lock(l) {
+            j.x = mx;
+            j.y = my;
+        }
+        return j.toJSON();
+    }
+
+    public static void Protocole(Socket sock) {
+        byte[] buffer = new byte[2048];
+        string requete = "GET /index.html HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        sock.Send(Encoding.ASCII.GetBytes(requete));
+        
+        int lus = sock.Receive(buffer);
+        if (lus > 0) {
+            MonoBehaviour.print("Client reçu: " + Encoding.ASCII.GetString(buffer, 0, lus));
+        }
     }
 
     public static void Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        IPEndPoint serverEP = new IPEndPoint(targetAddr, portCible);
-
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         try {
-            Joueur j = new Joueur();
-            j.id = "Client_" + Thread.CurrentThread.ManagedThreadId;
-            lock (l) {
-                j.x = mx;
-                j.y = my;
-                j.timestamp = DateTime.Now.Ticks;
-            }
-
-            byte[] data = Encoding.ASCII.GetBytes("POST " + j.toJSON() + "\n");
-            sock.SendTo(data, serverEP);
+            sock.Connect(targetAddr, portCible);
+            lock(l) { Thread.Sleep(rnd.Next(100, 103)); }
+            Protocole(sock);
+            Thread.Sleep(100);
         }
         catch (Exception e) {
-            Debug.LogError("Erreur Client UDP: " + e.Message);
-        }
-        finally {
+            lock(l) { zt--; }
             sock.Close();
-            lock (l) { zt--; }
+            throw e;
         }
+        sock.Close();
+        lock(l) { zt--; }
     }
 
     public static void Demarre(IPAddress zeTargetID, int port) {
         targetAddr = zeTargetID;
         portCible = port;
         for (int i = 0; i < NB_CL; i++) {
-            lock (l) { zt++; }
             new Thread(new ThreadStart(Run)).Start();
+            lock(l) { zt++; }
         }
     }
 }
@@ -110,89 +134,112 @@ class Client {
 class Serveur {
     public static Thread zt;
     private static int portServeur;
-    private static readonly object l = new object();
-    private static int connexionsTraitees = 0;
+    private static readonly System.Object l = new System.Object();
+    public static int connexionsTraitees = 0;
     public static InfoList logs = new InfoList(10);
-    public static bool actif = false;
-    private static Dictionary<string, long> derniersTimestamps = new Dictionary<string, long>();
+    private static FileAttente missions = new FileAttente();
+    private const int NB_THREADS_POOL = 5;
 
-    public static async Task Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        sock.Bind(new IPEndPoint(IPAddress.Any, portServeur));
-        actif = true;
-        byte[] buffer = new byte[4096];
+    public static int nouveauTraitement() {
+        lock(l) {
+            return connexionsTraitees++;
+        }
+    }
 
+    private static void WorkerLoop() {
+        while (true) {
+            Socket s = missions.Defiler();
+            ProtocoleServeur p = new ProtocoleServeur(s);
+            p.Protocole();
+        }
+    }
+
+    public static void Run() {
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         try {
-            while (actif) {
-                var result = await sock.ReceiveFromAsync(new ArraySegment<byte>(buffer), SocketFlags.None, new IPEndPoint(IPAddress.Any, 0));
-                string msg = Encoding.ASCII.GetString(buffer, 0, result.ReceivedBytes);
-                TraiterMessage(msg, result.RemoteEndPoint);
+            for (int i = 0; i < NB_THREADS_POOL; i++) {
+                Thread t = new Thread(new ThreadStart(WorkerLoop));
+                t.IsBackground = true;
+                t.Start();
+            }
+
+            sock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            sock.Bind(new IPEndPoint(IPAddress.Any, portServeur));
+            sock.Listen(Client.NB_CL);
+
+            while (true) {
+                Socket ear = sock.Accept();
+                if (ear != null) {
+                    missions.Enfiler(ear);
+                }
             }
         }
         catch (Exception e) {
-            Debug.LogError("Erreur Serveur: " + e.Message);
+            if (sock != null) sock.Close();
+            zt = null;
+            throw e;
         }
         finally {
-            sock.Close();
             zt = null;
         }
     }
 
-    private static void TraiterMessage(string msg, EndPoint remoteEP) {
-        int ml = msg.Length;
-        if (ml > 6 && msg.StartsWith("POST ") && msg.EndsWith("\n")) {
-            string data = msg.Substring(5, ml - 6);
-            Joueur j = Joueur.fromJSON(data);
-            if (j != null) {
-                lock (l) {
-                    if (!derniersTimestamps.ContainsKey(j.id) || j.timestamp > derniersTimestamps[j.id]) {
-                        derniersTimestamps[j.id] = j.timestamp;
-                        connexionsTraitees++;
-                        logs.addItem(remoteEP.ToString() + " : " + j.x + "," + j.y);
-                    }
-                }
-            }
-        }
-    }
-
-    public static async void Demarre(int port) {
+    public static void Demarre(int port) {
+        if (zt != null) return;
         portServeur = port;
-        zt = Thread.CurrentThread;
-        await Run();
-    }
-
-    public static void Stop() {
-        actif = false;
+        zt = new Thread(new ThreadStart(Run));
+        zt.Start();
     }
 }
 
 class InfoList {
-    private string[] list;
+    private String[] list;
     private int pointer = 0;
 
     public InfoList(int nb) {
-        this.list = new string[nb];
+        this.list = new String[nb];
     }
 
-    public void addItem(string s) {
+    public void addItem(String s) {
         lock (this) {
             this.list[this.pointer] = s;
             this.pointer = (this.pointer + 1) % this.list.Length;
         }
     }
 
-    public string toString() {
-        string res = "";
+    public String toString() {
+        String res = "";
         lock (this) {
             for (int i = 0; i < this.list.Length; i++) {
-                string s = this.list[(this.pointer + i) % this.list.Length];
-                if (s != null) res += s + "\n";
+                String s = this.list[(this.pointer + i) % this.list.Length];
+                if (s != null) {
+                    res = res + s + "\n";
+                }
             }
         }
         return res;
     }
 }
 
+class FileAttente {
+    private Queue<Socket> file = new Queue<Socket>();
+
+    public void Enfiler(Socket s) {
+        lock(this) {
+            file.Enqueue(s);
+            Monitor.Pulse(this);
+        }
+    }
+
+    public Socket Defiler() {
+        lock(this) {
+            while (file.Count == 0) {
+                Monitor.Wait(this);
+            }
+            return file.Dequeue();
+        }
+    }
+}
 
 [Serializable]
 public class Joueur {
@@ -201,7 +248,6 @@ public class Joueur {
     public int port;
     public float x;
     public float y;
-    public long timestamp;
 
     public String toJSON() {
         return JsonUtility.ToJson(this);
@@ -211,3 +257,43 @@ public class Joueur {
     }
 }
 
+class ProtocoleServeur {
+    private Socket ear;
+    public ProtocoleServeur(Socket ear) {
+        this.ear = ear;
+    }
+
+    public void Protocole() {
+        byte[] buffer = new byte[2048];
+        try {
+            int lus = this.ear.Receive(buffer);
+            if (lus > 0) {
+                string msg = Encoding.ASCII.GetString(buffer, 0, lus);
+                
+                string[] lignes = msg.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.None);
+                if (lignes.Length > 0) {
+                    string[] parts = lignes[0].Split(' ');
+
+                    if (parts.Length >= 2 && parts[0] == "GET") {
+                        string filePath = parts[1];
+                        Serveur.logs.addItem("Fichier demande : " + filePath);
+
+                        string corps = "<html><body><h1>Fichier: " + filePath + "</h1></body></html>";
+                        string entete = "HTTP/1.1 200 OK\r\n" +
+                                       "Content-Type: text/html\r\n" +
+                                       "Content-Length: " + corps.Length + "\r\n" +
+                                       "Connection: close\r\n\r\n";
+
+                        this.ear.Send(Encoding.ASCII.GetBytes(entete + corps));
+                    }
+                }
+            }
+        }
+        catch (Exception e) {
+            Debug.Log("Erreur: " + e.Message);
+        }
+        finally {
+            ear.Close();
+        }
+    }
+}
