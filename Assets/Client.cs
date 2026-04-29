@@ -24,11 +24,11 @@ class Client {
         }
     }
 
-    public static String GetMessage(Socket sock) {
+    public static String GetMessage(EndPoint localEP) {
         Joueur j = new Joueur();
         j.id = "client_" + (compteur++);
-        j.adresseIP = "" + ((IPEndPoint)sock.LocalEndPoint).Address;
-        j.port = ((IPEndPoint)sock.LocalEndPoint).Port;
+        j.adresseIP = "" + ((IPEndPoint)localEP).Address;
+        j.port = ((IPEndPoint)localEP).Port;
         lock(l) {
             j.x = mx;
             j.y = my;
@@ -36,28 +36,33 @@ class Client {
         return j.toJSON();
     }
 
-    public static void Protocole(Socket sock) {
-        byte[] buffer = new byte[2048];
-        sock.Send(Encoding.ASCII.GetBytes("POST " + GetMessage(sock) + "\n"));
-        int lus = sock.Receive(buffer);
-        MonoBehaviour.print("Reçu: " + Encoding.ASCII.GetString(buffer, 0, lus));
-    }
-
     public static void Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         try {
-            sock.Connect(targetAddr, portCible);
+            EndPoint targetEP = new IPEndPoint(targetAddr, portCible);
             lock(l) { Thread.Sleep(rnd.Next(100, 103)); }
-            Protocole(sock);
-            Thread.Sleep(100);
+            
+            byte[] buffer = new byte[2048];
+            string jsonMsg = GetMessage(new IPEndPoint(IPAddress.Any, 0));
+            byte[] data = Encoding.ASCII.GetBytes("POST " + jsonMsg + "\n");
+            
+            sock.SendTo(data, targetEP);
+
+            sock.ReceiveTimeout = 800;
+            try {
+                int lus = sock.Receive(buffer);
+                MonoBehaviour.print("UDP Reçu: " + Encoding.ASCII.GetString(buffer, 0, lus));
+            } catch (SocketException) {
+                MonoBehaviour.print("Paquet obsolète : délai de réponse dépassé.");
+            }
         }
         catch (Exception e) {
-            lock(l) { zt--; }
-            sock.Close();
-            throw e;
+            Debug.LogError("Erreur Client UDP: " + e.Message);
         }
-        sock.Close();
-        lock(l) { zt--; }
+        finally {
+            sock.Close();
+            lock(l) { zt--; }
+        }
     }
 
     public static void Demarre(IPAddress zeTargetID, int port) {
