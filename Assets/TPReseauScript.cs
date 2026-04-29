@@ -62,153 +62,102 @@ public class TPReseauScript : MonoBehaviour
 
 class Client {
     public static int zt = 0;
-    private static readonly System.Object l = new System.Object();
-    private static System.Random rnd = new System.Random();
+    private static readonly object l = new object();
     public const int NB_CL = 20;
-    
     private static IPAddress targetAddr;
     private static int portCible;
-    private static float mx;
-    private static float my;
-    private static int compteur = 0;
+    private static float mx, my;
 
     public static void SetMessage(float x, float y) {
-        lock(l) {
-            mx = x; 
-            my = y;
-        }
-    }
-
-    public static String GetMessage(Socket sock) {
-        Joueur j = new Joueur();
-        j.id = "client_" + (compteur++);
-        j.adresseIP = "" + ((IPEndPoint)sock.LocalEndPoint).Address;
-        j.port = ((IPEndPoint)sock.LocalEndPoint).Port;
-        lock(l) {
-            j.x = mx;
-            j.y = my;
-        }
-        return j.toJSON();
-    }
-
-    public static void Protocole(Socket sock) {
-        byte[] buffer = new byte[2048];
-        sock.Send(Encoding.ASCII.GetBytes("POST " + GetMessage(sock) + "\n"));
-        int lus = sock.Receive(buffer);
-        MonoBehaviour.print("Reçu: " + Encoding.ASCII.GetString(buffer, 0, lus));
+        lock (l) { mx = x; my = y; }
     }
 
     public static void Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        IPEndPoint serverEP = new IPEndPoint(targetAddr, portCible);
+
         try {
-            sock.Connect(targetAddr, portCible);
-            lock(l) { Thread.Sleep(rnd.Next(100, 103)); }
-            Protocole(sock);
-            Thread.Sleep(100);
+            Joueur j = new Joueur();
+            j.id = "Client_" + Thread.CurrentThread.ManagedThreadId;
+            lock (l) {
+                j.x = mx;
+                j.y = my;
+                j.timestamp = DateTime.Now.Ticks;
+            }
+
+            byte[] data = Encoding.ASCII.GetBytes("POST " + j.toJSON() + "\n");
+            sock.SendTo(data, serverEP);
         }
         catch (Exception e) {
-            lock(l) { zt--; }
-            sock.Close();
-            throw e;
+            Debug.LogError("Erreur Client UDP: " + e.Message);
         }
-        sock.Close();
-        lock(l) { zt--; }
+        finally {
+            sock.Close();
+            lock (l) { zt--; }
+        }
     }
 
     public static void Demarre(IPAddress zeTargetID, int port) {
         targetAddr = zeTargetID;
         portCible = port;
         for (int i = 0; i < NB_CL; i++) {
+            lock (l) { zt++; }
             new Thread(new ThreadStart(Run)).Start();
-            lock(l) { zt++; }
         }
     }
 }
 
 class Serveur {
-    public static Thread zt; // Le prof utilise un Thread pour le contrôle
-    public const int NB_CNX = 20;
+    public static Thread zt;
     private static int portServeur;
     private static readonly object l = new object();
     private static int connexionsTraitees = 0;
     public static InfoList logs = new InfoList(10);
-    
-    private Socket ear;
     public static bool actif = false;
-
-    public Serveur(Socket ear) {
-        this.ear = ear;
-    }
-
-    public static void ajouteConnexionTraitee() {
-        lock(l) { connexionsTraitees++; }
-    }
-
-    public static int GetConnexionTraitees() {
-        return connexionsTraitees;
-    }
-
-    public async Task Protocole() {
-        try {
-            byte[] buffer = new byte[2048];
-
-            int lus = await ear.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
-
-            if (lus > 0) {
-                string msg = Encoding.ASCII.GetString(buffer, 0, lus);
-                Debug.Log("Serveur.Protocole(): reçu du client : " + msg);
-
-                int ml = msg.Length;
-                string method = msg.Substring(0, 4);
-                
-                if (method.Equals("POST") && ' ' == msg[4] && '\n' == msg[ml - 1]) {
-                    string data = msg.Substring(5, ml - 6);
-                    logs.addItem(ear.RemoteEndPoint + " : " + data);
-                    
-                    Joueur j = Joueur.fromJSON(data);
-                    if (null != j) {
-                        ajouteConnexionTraitee();
-                    }
-                }
-                byte[] resp = Encoding.ASCII.GetBytes("" + GetConnexionTraitees());
-                await ear.SendAsync(new ArraySegment<byte>(resp), SocketFlags.None);
-            }
-        }
-        catch (Exception) { }
-        finally {
-            ear.Close();
-        }
-    }
+    private static Dictionary<string, long> derniersTimestamps = new Dictionary<string, long>();
 
     public static async Task Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        IPEndPoint associationLocale = new IPEndPoint(IPAddress.Any, portServeur);
-        
-        sock.Bind(associationLocale);
-        sock.Listen(NB_CNX);
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        sock.Bind(new IPEndPoint(IPAddress.Any, portServeur));
         actif = true;
+        byte[] buffer = new byte[4096];
 
         try {
             while (actif) {
-
-                Socket ear = await sock.AcceptAsync();
-                Serveur cnx = new Serveur(ear);
-                _ = cnx.Protocole(); 
+                var result = await sock.ReceiveFromAsync(new ArraySegment<byte>(buffer), SocketFlags.None, new IPEndPoint(IPAddress.Any, 0));
+                string msg = Encoding.ASCII.GetString(buffer, 0, result.ReceivedBytes);
+                TraiterMessage(msg, result.RemoteEndPoint);
             }
-            sock.Close();
         }
         catch (Exception e) {
+            Debug.LogError("Erreur Serveur: " + e.Message);
+        }
+        finally {
             sock.Close();
             zt = null;
-            throw new Exception("Erreur du serveur :", e);
         }
-        Debug.Log("Serveur Fin");
-        zt = null;
+    }
+
+    private static void TraiterMessage(string msg, EndPoint remoteEP) {
+        int ml = msg.Length;
+        if (ml > 6 && msg.StartsWith("POST ") && msg.EndsWith("\n")) {
+            string data = msg.Substring(5, ml - 6);
+            Joueur j = Joueur.fromJSON(data);
+            if (j != null) {
+                lock (l) {
+                    if (!derniersTimestamps.ContainsKey(j.id) || j.timestamp > derniersTimestamps[j.id]) {
+                        derniersTimestamps[j.id] = j.timestamp;
+                        connexionsTraitees++;
+                        logs.addItem(remoteEP.ToString() + " : " + j.x + "," + j.y);
+                    }
+                }
+            }
+        }
     }
 
     public static async void Demarre(int port) {
         portServeur = port;
-        zt = Thread.CurrentThread; 
+        zt = Thread.CurrentThread;
         await Run();
     }
 
@@ -218,28 +167,26 @@ class Serveur {
 }
 
 class InfoList {
-    private String[] list;
+    private string[] list;
     private int pointer = 0;
 
     public InfoList(int nb) {
-        this.list = new String[nb];
+        this.list = new string[nb];
     }
 
-    public void addItem(String s) {
+    public void addItem(string s) {
         lock (this) {
             this.list[this.pointer] = s;
             this.pointer = (this.pointer + 1) % this.list.Length;
         }
     }
 
-    public String toString() {
-        String res = "";
+    public string toString() {
+        string res = "";
         lock (this) {
             for (int i = 0; i < this.list.Length; i++) {
-                String s = this.list[(this.pointer + i) % this.list.Length];
-                if (s != null) {
-                    res = res + s + "\n";
-                }
+                string s = this.list[(this.pointer + i) % this.list.Length];
+                if (s != null) res += s + "\n";
             }
         }
         return res;
@@ -254,6 +201,7 @@ public class Joueur {
     public int port;
     public float x;
     public float y;
+    public long timestamp;
 
     public String toJSON() {
         return JsonUtility.ToJson(this);
