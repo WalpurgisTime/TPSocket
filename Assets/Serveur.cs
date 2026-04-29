@@ -4,8 +4,10 @@ using System.Net;
 using UnityEngine;
 using System.Net.Sockets;
 using System.Threading.Tasks;
+using System.Threading;
 
 class Serveur {
+    public static Thread zt;
     private static TcpListener listener;
     private static bool actif = false;
     private static int portServeur;
