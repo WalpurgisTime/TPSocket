@@ -1,26 +1,25 @@
 using UnityEngine;
-
+using System;
 class InfoList {
-  private string[] list;
-  private int pointer = 0;
+    private String[] list;
+    private int pointer = 0;
+    public InfoList(int nb) { this.list = new String[nb]; }
 
-  public InfoList(int nb){
-    this.list = new string[nb];
-  }
-
-  public void addItem(string s){
-    this.list[this.pointer] = s;
-    this.pointer = (this.pointer + 1) % this.list.Length;
-  }
-
-  public string toString(){
-    string res = "";
-    for(int i = 0; i < this.list.Length; i++){
-      string s = this.list[(this.pointer + i) % this.list.Length];
-      if(null != s){
-        res = res + s + "\n";
-      }
+    public void addItem(String s) {
+        lock(this) {
+            this.list[this.pointer] = s;
+            this.pointer = (this.pointer + 1) % this.list.Length;
+        }
     }
-    return res;
-  }
+
+    public String toString() {
+        String res = "";
+        lock(this) {
+            for (int i = 0; i < this.list.Length; i++) {
+                String s = this.list[(this.pointer + i) % this.list.Length];
+                if (s != null) res = res + s + "\n";
+            }
+        }
+        return res;
+    }
 }

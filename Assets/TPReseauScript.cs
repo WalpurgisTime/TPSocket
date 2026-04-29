@@ -45,7 +45,8 @@ public class TPReseauScript : MonoBehaviour
     void Update()
     {
         ServeurBtn.interactable= (null==Serveur.zt);
-        ClientBtn.interactable= (null==Client.zt);
+        //ClientBtn.interactable= (null==Client.zt);
+        ClientBtn.interactable = (0 == Client.zt);
         Vector3 pos= Input.mousePosition;
         sourisXIF.text= ""+pos.x;
         sourisYIF.text= ""+pos.y;

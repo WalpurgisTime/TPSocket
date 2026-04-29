@@ -8,97 +8,36 @@ using System.Threading;
 class Serveur {
     public static Thread zt;
     private static int portServeur;
+    private static readonly System.Object l = new System.Object();
     private static int connexionsTraitees = 0;
     public static InfoList logs = new InfoList(10);
 
-    public static void Protocole(Socket ear) {
-        byte[] buffer = new byte[2048];
-        int lus = ear.Receive(buffer);
-        
-        if (lus > 0) {
-            String derniereReception = Encoding.ASCII.GetString(buffer).Substring(0, lus);
-            Debug.Log("Serveur.Protocole(): reçu du client : " + derniereReception);
-            
-            int ml = derniereReception.Length;
-            String method = derniereReception.Substring(0, 4);
-
-            if (method.Equals("POST") && ' ' == derniereReception[4] && '\n' == derniereReception[ml - 1]) {
-                String data = derniereReception.Substring(5, ml - 6);
-                logs.addItem(ear.RemoteEndPoint + " lié à " + ear.LocalEndPoint + " : " + data);
-                connexionsTraitees++;
-            }
-            
-            ear.Send(Encoding.ASCII.GetBytes(connexionsTraitees.ToString()));
-        }
+    public static int nouveauTraitement() {
+        lock(l) { return connexionsTraitees++; }
     }
 
     public static void Run() {
         Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        
         try {
             sock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            IPEndPoint endPoint = new IPEndPoint(IPAddress.Any, portServeur);
-            
-            sock.Bind(endPoint);
-            sock.Listen(5);
-
-            Socket ear;
+            sock.Bind(new IPEndPoint(IPAddress.Any, portServeur));
+            // Augmentation du Listen pour gérer le burst de clients
+            sock.Listen(Client.NB_CL);
             while (true) {
-                ear = sock.Accept();
+                Socket ear = sock.Accept();
                 if (ear != null) {
-                    Protocole(ear);
-                    ear.Close();
+                    new Thread(new ThreadStart(new ProtocoleServeur(ear).Protocole)).Start();
                 }
             }
         }
-        catch (Exception e) {
-            if (sock != null) sock.Close();
-            zt = null;
-
-            throw e;
-        }
-        finally {
-            zt = null;
-        }
+        catch (Exception e) { if (sock != null) sock.Close(); zt = null; throw e; }
+        finally { zt = null; }
     }
 
     public static void Demarre(int port) {
-        if (null != zt) {
-            Debug.Log("Thread serveur déjà démarré");
-            return;
-        }
+        if (zt != null) return;
         portServeur = port;
         zt = new Thread(new ThreadStart(Run));
         zt.Start();
     }
 }
-
-  /*
-  using System;
-using System.Text;
-using System.Net;
-using System.Net.Sockets;
-
-class Serveur {
-  public static void Main(string[] args) {
-    byte[] buffer= new byte[2048];
-    Socket sock= new Socket(AddressFamily.InterNetwork
-                              , SocketType.Stream
-                              , ProtocolType.Tcp);
-    IPAddress addr= IPAddress.Any;
-    IPEndPoint endPoint= new IPEndPoint(addr, 9090);
-    sock.Bind(endPoint);
-    sock.Listen(1);
-    Socket ear= sock.Accept();
-    ear.Receive(buffer);
-    Console.WriteLine("Server.Main(): Connexion depuis : "
-                     + Encoding.ASCII.GetString(buffer));
-    ear.Send(Encoding.ASCII.GetBytes("Hello"));
-    Array.Clear(buffer, 0, buffer.Length);
-    ear.Receive(buffer);
-    Console.WriteLine("Server.Main(): Fin ? "
-                     + Encoding.ASCII.GetString(buffer));
-    ear.Close();
-    sock.Close();
-    }
-    */
