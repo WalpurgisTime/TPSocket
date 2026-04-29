@@ -1,7 +1,6 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 
 class Serveur {
@@ -10,6 +9,8 @@ class Serveur {
     private static readonly System.Object l = new System.Object();
     public static int connexionsTraitees = 0;
     public static InfoList logs = new InfoList(10);
+    private static FileAttente missions = new FileAttente();
+    private const int NB_THREADS_POOL = 5;
 
     public static int nouveauTraitement() {
         lock(l) {
@@ -17,27 +18,36 @@ class Serveur {
         }
     }
 
+    private static void WorkerLoop() {
+        while (true) {
+            Socket s = missions.Defiler();
+            ProtocoleServeur p = new ProtocoleServeur(s);
+            p.Protocole();
+        }
+    }
+
     public static void Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         try {
+            for (int i = 0; i < NB_THREADS_POOL; i++) {
+                Thread t = new Thread(new ThreadStart(WorkerLoop));
+                t.IsBackground = true;
+                t.Start();
+            }
+
             sock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             sock.Bind(new IPEndPoint(IPAddress.Any, portServeur));
-
-            byte[] buffer = new byte[2048];
-            EndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
+            sock.Listen(Client.NB_CL);
 
             while (true) {
-                int lus = sock.ReceiveFrom(buffer, ref remoteEP);
-                if (lus > 0) {
-                    string msg = Encoding.ASCII.GetString(buffer, 0, lus);
-                    new Thread(() => ProtocoleServeur.TraitementDirect(sock, msg, remoteEP)).Start();
+                Socket ear = sock.Accept();
+                if (ear != null) {
+                    missions.Enfiler(ear);
                 }
             }
         }
         catch (Exception) {
-            zt = null;
-        }
-        finally {
+            if (sock != null) sock.Close();
             zt = null;
         }
     }

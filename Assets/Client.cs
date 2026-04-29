@@ -1,72 +1,49 @@
 using System;
 using System.Text;
 using System.Net;
-using UnityEngine;
 using System.Net.Sockets;
 using System.Threading;
+using UnityEngine;
 
 class Client {
     public static int zt = 0;
     private static readonly System.Object l = new System.Object();
     private static System.Random rnd = new System.Random();
     public const int NB_CL = 20;
-    
     private static IPAddress targetAddr;
     private static int portCible;
-    private static float mx;
-    private static float my;
-    private static int compteur = 0;
 
-    public static void SetMessage(float x, float y) {
-        lock(l) {
-            mx = x; 
-            my = y;
+    public static void Protocole(Socket sock) {
+        byte[] buffer = new byte[4096];
+        string requeteHTTP = "GET /index.html HTTP/1.1\r\n" +
+                             "Host: localhost\r\n" +
+                             "Connection: close\r\n\r\n";
+                         
+        sock.Send(Encoding.ASCII.GetBytes(requeteHTTP));
+        
+        int lus = sock.Receive(buffer);
+        if (lus > 0) {
+            string rep = Encoding.ASCII.GetString(buffer, 0, lus);
+            MonoBehaviour.print("Client recoit HTTP:\n" + rep);
         }
-    }
-
-    public static String GetMessage(EndPoint localEP) {
-        Joueur j = new Joueur();
-        j.id = "client_" + (compteur++);
-        j.adresseIP = "" + ((IPEndPoint)localEP).Address;
-        j.port = ((IPEndPoint)localEP).Port;
-        lock(l) {
-            j.x = mx;
-            j.y = my;
-        }
-        return j.toJSON();
     }
 
     public static void Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         try {
-            EndPoint targetEP = new IPEndPoint(targetAddr, portCible);
-            lock(l) { Thread.Sleep(rnd.Next(100, 103)); }
-            
-            byte[] buffer = new byte[2048];
-            string jsonMsg = GetMessage(new IPEndPoint(IPAddress.Any, 0));
-            byte[] data = Encoding.ASCII.GetBytes("POST " + jsonMsg + "\n");
-            
-            sock.SendTo(data, targetEP);
-
-            sock.ReceiveTimeout = 800;
-            try {
-                int lus = sock.Receive(buffer);
-                MonoBehaviour.print("UDP Reçu: " + Encoding.ASCII.GetString(buffer, 0, lus));
-            } catch (SocketException) {
-                MonoBehaviour.print("Paquet obsolète : délai de réponse dépassé.");
-            }
+            sock.Connect(targetAddr, portCible);
+            lock(l) { Thread.Sleep(rnd.Next(10, 50)); }
+            Protocole(sock);
         }
-        catch (Exception e) {
-            Debug.LogError("Erreur Client UDP: " + e.Message);
-        }
+        catch (Exception) { }
         finally {
             sock.Close();
             lock(l) { zt--; }
         }
     }
 
-    public static void Demarre(IPAddress zeTargetID, int port) {
-        targetAddr = zeTargetID;
+    public static void Demarre(IPAddress target, int port) {
+        targetAddr = target;
         portCible = port;
         for (int i = 0; i < NB_CL; i++) {
             new Thread(new ThreadStart(Run)).Start();
