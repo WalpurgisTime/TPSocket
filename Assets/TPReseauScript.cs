@@ -7,6 +7,7 @@ using System;
 using System.Text;
 using System.Net.Sockets;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 public class TPReseauScript : MonoBehaviour
 {
@@ -125,63 +126,94 @@ class Client {
 }
 
 class Serveur {
-    public static Thread zt;
+    public static Thread zt; // Le prof utilise un Thread pour le contrôle
+    public const int NB_CNX = 20;
     private static int portServeur;
-    private static readonly System.Object l = new System.Object();
-    public static int connexionsTraitees = 0;
+    private static readonly object l = new object();
+    private static int connexionsTraitees = 0;
     public static InfoList logs = new InfoList(10);
-    private static FileAttente missions = new FileAttente();
-    private const int NB_THREADS_POOL = 5;
+    
+    private Socket ear;
+    public static bool actif = false;
 
-    public static int nouveauTraitement() {
-        lock(l) {
-            return connexionsTraitees++;
-        }
+    public Serveur(Socket ear) {
+        this.ear = ear;
     }
 
-    private static void WorkerLoop() {
-        while (true) {
-            Socket s = missions.Defiler();
-            ProtocoleServeur p = new ProtocoleServeur(s);
-            p.Protocole();
-        }
+    public static void ajouteConnexionTraitee() {
+        lock(l) { connexionsTraitees++; }
     }
 
-    public static void Run() {
-        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+    public static int GetConnexionTraitees() {
+        return connexionsTraitees;
+    }
+
+    public async Task Protocole() {
         try {
-            for (int i = 0; i < NB_THREADS_POOL; i++) {
-                Thread t = new Thread(new ThreadStart(WorkerLoop));
-                t.IsBackground = true;
-                t.Start();
-            }
+            byte[] buffer = new byte[2048];
 
-            sock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            sock.Bind(new IPEndPoint(IPAddress.Any, portServeur));
-            sock.Listen(Client.NB_CL);
+            int lus = await ear.ReceiveAsync(new ArraySegment<byte>(buffer), SocketFlags.None);
 
-            while (true) {
-                Socket ear = sock.Accept();
-                if (ear != null) {
-                    missions.Enfiler(ear);
+            if (lus > 0) {
+                string msg = Encoding.ASCII.GetString(buffer, 0, lus);
+                Debug.Log("Serveur.Protocole(): reçu du client : " + msg);
+
+                int ml = msg.Length;
+                string method = msg.Substring(0, 4);
+                
+                if (method.Equals("POST") && ' ' == msg[4] && '\n' == msg[ml - 1]) {
+                    string data = msg.Substring(5, ml - 6);
+                    logs.addItem(ear.RemoteEndPoint + " : " + data);
+                    
+                    Joueur j = Joueur.fromJSON(data);
+                    if (null != j) {
+                        ajouteConnexionTraitee();
+                    }
                 }
+                byte[] resp = Encoding.ASCII.GetBytes("" + GetConnexionTraitees());
+                await ear.SendAsync(new ArraySegment<byte>(resp), SocketFlags.None);
             }
+        }
+        catch (Exception) { }
+        finally {
+            ear.Close();
+        }
+    }
+
+    public static async Task Run() {
+        Socket sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        IPEndPoint associationLocale = new IPEndPoint(IPAddress.Any, portServeur);
+        
+        sock.Bind(associationLocale);
+        sock.Listen(NB_CNX);
+        actif = true;
+
+        try {
+            while (actif) {
+
+                Socket ear = await sock.AcceptAsync();
+                Serveur cnx = new Serveur(ear);
+                _ = cnx.Protocole(); 
+            }
+            sock.Close();
         }
         catch (Exception e) {
-            if (sock != null) sock.Close();
+            sock.Close();
             zt = null;
-            throw e;
+            throw new Exception("Erreur du serveur :", e);
         }
-        finally {
-            zt = null;
-        }
+        Debug.Log("Serveur Fin");
+        zt = null;
     }
 
-    public static void Demarre(int port) {
-        if (zt != null) return;
+    public static async void Demarre(int port) {
         portServeur = port;
-        zt = new Thread(new ThreadStart(Run));
-        zt.Start();
+        zt = Thread.CurrentThread; 
+        await Run();
+    }
+
+    public static void Stop() {
+        actif = false;
     }
 }
 
@@ -214,25 +246,6 @@ class InfoList {
     }
 }
 
-class FileAttente {
-    private Queue<Socket> file = new Queue<Socket>();
-
-    public void Enfiler(Socket s) {
-        lock(this) {
-            file.Enqueue(s);
-            Monitor.Pulse(this);
-        }
-    }
-
-    public Socket Defiler() {
-        lock(this) {
-            while (file.Count == 0) {
-                Monitor.Wait(this);
-            }
-            return file.Dequeue();
-        }
-    }
-}
 
 [Serializable]
 public class Joueur {
@@ -250,32 +263,3 @@ public class Joueur {
     }
 }
 
-class ProtocoleServeur {
-    private Socket ear;
-    public ProtocoleServeur(Socket ear) {
-        this.ear = ear;
-    }
-
-    public void Protocole() {
-        byte[] buffer = new byte[2048];
-        String reponse = "0";
-        try {
-            int lus = this.ear.Receive(buffer);
-            if (lus > 0) {
-                String msg = Encoding.ASCII.GetString(buffer, 0, lus);
-                int ml = msg.Length;
-                if (msg.StartsWith("POST") && msg[ml - 1] == '\n') {
-                    String data = msg.Substring(5, ml - 6);
-                    Serveur.logs.addItem("From: " + this.ear.RemoteEndPoint + " : " + data);
-                    reponse = "" + Serveur.nouveauTraitement();
-                }
-                this.ear.Send(Encoding.ASCII.GetBytes(reponse));
-            }
-            ear.Close();
-        }
-        catch (Exception e) {
-            if (ear != null) ear.Close();
-            throw e;
-        }
-    }
-}
